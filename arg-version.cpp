@@ -89,11 +89,18 @@ template <typename... Reserved> struct argument_allocator {
       for (auto b : reserved_used)
         assert(b);
       for (auto f : {[&] {
-             serial_offset += to_bytes(d, serial_offset + serial_region);
+             serial_offset +=
+                 mutils::to_bytes(d, serial_offset + serial_region);
            }...})
         f();
+      return serial_region;
     }
   };
+
+  template <typename... Dynamics>
+  void *prep_send(const Reserved &... r, const Dynamics &... d) {
+    return i->prep_send(r..., d...);
+  }
 
   template <typename T, typename... U>
   decltype(auto) alloc_and_init(U &&... u) {
@@ -114,5 +121,6 @@ int main() {
   std::array<char, size> one;
   argument_allocator<> a{one.data(), sizeof(one)};
   auto *i = a.alloc_and_init<std::list<int>>(0);
+  a.prep_send(*i);
   a.del(i);
 }
