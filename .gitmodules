@@ -1,0 +1,6 @@
+[submodule "mutils-serialization"]
+	path = mutils-serialization
+	url = git@github.com:derecho-project/mutils-serialization
+[submodule "mutils"]
+	path = mutils-repo
+	url = git@github.com:mpmilano/mutils
