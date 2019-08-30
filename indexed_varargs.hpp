@@ -34,12 +34,26 @@ struct build_with_sequence {
 
 template <std::size_t, typename...> struct _type_at_index;
 
-template <typename T> struct _type_at_index<0, T> { using type = T; };
+template <std::size_t s, typename T> struct _type_at_index<s, T> {
+  static_assert(s == 0, "Error: index out of range");
+  using type = T;
+};
 
-template <std::size_t index, typename T1, typename... TN>
-struct _type_at_index<index, T1, TN...> {
-  using type = std::conditional_t<index == 0, T1,
-                                  typename _type_at_index<index, TN...>::type>;
+template <std::size_t index, typename T1, typename T2, typename... TN>
+struct _type_at_index<index, T1, T2, TN...> {
+
+  static decltype(auto) constexpr type_builder() {
+    if constexpr (index == 0)
+      return (T1 *)nullptr;
+    else if constexpr (index < sizeof...(TN) + 2) {
+      using ret = typename _type_at_index<index - 1, T2, TN...>::type;
+      return (ret *)nullptr;
+    } else {
+      static_assert(index > 1 + sizeof...(TN), "Error: index out of range");
+    }
+  }
+
+  using type = std::decay_t<decltype(*type_builder())>;
 };
 
 template <std::size_t s, typename... T>
