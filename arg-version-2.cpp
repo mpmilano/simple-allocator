@@ -28,10 +28,10 @@ int main() {
   std::array<unsigned char, 1024> mem;
   message_builder<int, char, std::string, std::list<char>> mb(mem.data(),
                                                               sizeof(mem));
-  int *i = mb.build_arg<0>(15);
-  char *c = mb.build_arg<1>('e');
-  std::string *s = mb.build_arg<2>("str");
-  std::list<char> *l = mb.build_arg<3>();
+  arg_ptr<int> i = mb.build_arg<0>(15);
+  arg_ptr<char> c = mb.build_arg<1>('e');
+  arg_ptr<std::string> s = mb.build_arg<2>("str");
+  arg_ptr<std::list<char>> l = mb.build_arg<3>();
   (void)i;
   (void)c;
   (void)s;

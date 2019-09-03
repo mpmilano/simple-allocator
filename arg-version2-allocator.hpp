@@ -7,6 +7,22 @@
 #include <utility>
 
 namespace derecho_allocator {
+
+  namespace internal{
+    template<typename T>
+    struct deleter{
+      constexpr deleter() noexcept = default;
+      template <class U>
+      deleter( const deleter<U>& ) {}
+      template <class U>
+      deleter( deleter<U>&& ) {}
+      constexpr void operator()(T*) const {}
+    };
+  }
+
+  template<typename T>
+  using arg_ptr = std::unique_ptr<T, internal::deleter<T>>;
+  
 namespace internal {
 template <typename... StaticArgs> struct alloc_outer {
   template <typename T> using grow = alloc_outer<StaticArgs..., T>;
@@ -67,12 +83,12 @@ template <typename... StaticArgs> struct alloc_outer {
         mutils::ct::tuple<StaticArgs...> &sargs = *static_args;
         auto &sarg = sargs.template get<arg>();
         new (&sarg) Arg{std::forward<CArgs>(cargs)...};
-        return &sarg;
+        return arg_ptr<Arg>{&sarg};
       } else {
         auto &uptr =
             std::get<arg - sizeof...(StaticArgs)>(allocated_dynamic_args);
         uptr.reset(new Arg(std::forward<CArgs>(cargs)...));
-        return uptr.get();
+        return arg_ptr<Arg>{uptr.get()};
       }
     }
 
