@@ -1,6 +1,5 @@
 #include "indexed_varargs.hpp"
 #include "mutils-serialization/SerializationSupport.hpp"
-#include "mutils/compile-time-tuple.hpp"
 #include <cassert>
 #include <memory>
 #include <tuple>
@@ -8,30 +7,25 @@
 
 namespace derecho_allocator {
 
-  namespace internal{
-    template<typename T>
-    struct deleter{
-      constexpr deleter() noexcept = default;
-      template <class U>
-      deleter( const deleter<U>& ) {}
-      template <class U>
-      deleter( deleter<U>&& ) {}
-      constexpr void operator()(T*) const {}
-    };
-  }
+namespace internal {
+template <typename T> struct deleter {
+  constexpr deleter() noexcept = default;
+  template <class U> deleter(const deleter<U> &) {}
+  template <class U> deleter(deleter<U> &&) {}
+  constexpr void operator()(T *) const {}
+};
+} // namespace internal
 
-  template<typename T>
-  using arg_ptr = std::unique_ptr<T, internal::deleter<T>>;
-  
+template <typename T> using arg_ptr = std::unique_ptr<T, internal::deleter<T>>;
+
 namespace internal {
 template <typename... StaticArgs> struct alloc_outer {
-  template <typename T> using grow = alloc_outer<StaticArgs..., T>;
-  static_assert((std::is_trivially_copyable_v<StaticArgs> && ... && true),
-                "Error: outer allocator responsible for non-trivially-copyable "
-                "arguments.");
+
+  static_assert((std::is_trivially_copyable_v<StaticArgs> && ...),
+                "Internal error: alloc_outer args must be trivially copyable");
   template <typename... DynamicArgs> struct alloc_inner {
     static_assert(
-        ((!std::is_trivially_copyable_v<DynamicArgs>)&&... && true),
+        ((!std::is_trivially_copyable_v<DynamicArgs>)&&...),
         "Error: trivially-copyable arguments appear after "
         "dynamically-allocted arguments. This method cannot be "
         "invoked via prepare"); // or whatever "prepare" is ultimately called
@@ -45,8 +39,8 @@ template <typename... StaticArgs> struct alloc_outer {
         constexpr const auto new_indx = indx - sizeof...(StaticArgs);
         return (type_at_index<new_indx, DynamicArgs...> *)nullptr;
       }
-      // intentionally reaching the end of void function here, should hopefully
-      // only be an error when the static_assert would also fail
+      // intentionally reaching the end of non-void function here, should
+      // hopefully only be an error when the static_assert would also fail
     }
 
     template <std::size_t s>
@@ -55,18 +49,26 @@ template <typename... StaticArgs> struct alloc_outer {
     using char_p = unsigned char *;
     const char_p serial_region;
     const std::size_t serial_size;
+    static const constexpr auto static_arg_size = (sizeof(StaticArgs) + ...);
 
-    using static_args_ptr_t = mutils::ct::tuple<StaticArgs...> *;
-    // NOTE: THIS IS OBVIOUSLY BROKEN WITH CURRENT DERECHO!!!
-    const static_args_ptr_t static_args = (static_args_ptr_t)serial_region;
-    static const constexpr std::size_t static_arg_size = sizeof(static_args);
-    static_assert(static_arg_size <= (sizeof(StaticArgs) + ... + 12));
-
+    std::tuple<StaticArgs *...> static_args;
     std::tuple<std::unique_ptr<DynamicArgs>...> allocated_dynamic_args;
 
     alloc_inner(char_p serial_region, std::size_t serial_size)
         : serial_region(serial_region), serial_size(serial_size) {
       assert(serial_size >= static_arg_size);
+      char_p offset = serial_region;
+      std::apply(
+          [&](auto &... static_args) {
+            std::size_t indx = 0;
+            const constexpr std::size_t sizes[] = {sizeof(StaticArgs)...};
+            for (char_p *ptr : {((unsigned char **)&static_args)...}) {
+              *ptr = offset;
+              offset += sizes[indx];
+              ++indx;
+            }
+          },
+          static_args);
     }
 
     template <std::size_t s> static constexpr bool is_static() {
@@ -80,10 +82,9 @@ template <typename... StaticArgs> struct alloc_outer {
 
       using Arg = get_arg<arg>;
       if constexpr (is_static<arg>()) {
-        mutils::ct::tuple<StaticArgs...> &sargs = *static_args;
-        auto &sarg = sargs.template get<arg>();
-        new (&sarg) Arg{std::forward<CArgs>(cargs)...};
-        return arg_ptr<Arg>{&sarg};
+        auto *sarg = std::get<arg>(static_args);
+        new (sarg) Arg{std::forward<CArgs>(cargs)...};
+        return arg_ptr<Arg>{sarg};
       } else {
         auto &uptr =
             std::get<arg - sizeof...(StaticArgs)>(allocated_dynamic_args);
@@ -94,7 +95,7 @@ template <typename... StaticArgs> struct alloc_outer {
 
     char *serialize() const {
       std::size_t offset{static_arg_size};
-      mutils::for_each(
+      mutils::foreach (
           [&](const auto &uptr) {
             offset += mutils::to_bytes(*uptr, offset + serial_region);
           },
@@ -110,22 +111,24 @@ template <typename a> struct _build_allocator<a> {
   using type = typename alloc_outer<>::template alloc_inner<>;
 };
 
-template <typename alloc_outer, typename Fst, typename... Rst>
-struct _build_allocator<alloc_outer, Fst, Rst...> {
+template <typename _alloc_outer, typename Fst, typename... Rst>
+struct _build_allocator<_alloc_outer, Fst, Rst...> {
 
-  static decltype(auto) type_builder() {
+  template <typename... outer_params>
+  static decltype(auto) type_builder(alloc_outer<outer_params...> *) {
     if constexpr (std::is_trivially_copyable_v<Fst>) {
-      using ret =
-          typename _build_allocator<typename alloc_outer::template grow<Fst>,
-                                    Rst...>::type;
+      using ret = typename _build_allocator<alloc_outer<outer_params..., Fst>,
+                                            Rst...>::type;
       return (ret *)nullptr;
     } else {
-      using ret = typename alloc_outer::template alloc_inner<Fst, Rst...>;
+      using ret =
+          typename alloc_outer<outer_params...>::template alloc_inner<Fst,
+                                                                      Rst...>;
       return (ret *)nullptr;
     }
   }
 
-  using type = std::decay_t<decltype(*type_builder())>;
+  using type = std::decay_t<decltype(*type_builder((_alloc_outer *)nullptr))>;
 };
 
 template <typename... T>
