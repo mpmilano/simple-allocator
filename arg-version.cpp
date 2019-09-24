@@ -9,9 +9,10 @@
 #include <memory>
 #include <type_traits>
 
+namespace _details {
 template <typename... Reserved> struct argument_allocator {
   static_assert((std::is_trivially_copyable_v<Reserved> && ... && true),
-                "Error: Can only reserve POD types");
+                "Error: Can only reserve trivially-copyable types");
   // Design idea:  reserve a portion of the serialized space to represent the
   // offsets in which the arguments are being sent.   [12,36,42,2; objects...]
   // Use a ushort for each number in the argument order. Fill this in at
@@ -116,10 +117,56 @@ template <typename... Reserved> struct argument_allocator {
       : i(new _i{serial_region, serial_size}) {}
 };
 
+template <typename...> struct argument_allocator_builder;
+
+template <> struct argument_allocator_builder<> {
+  using type = argument_allocator<>;
+};
+
+template <typename Fst, typename... rst>
+struct argument_allocator_builder<Fst, rst...> {
+
+  template <typename... rst_pod>
+  static auto fst_copyable(argument_allocator<rst_pod...> *) {
+    if constexpr (std::is_trivially_copyable_v<Fst>) {
+      return (argument_allocator<Fst, rst_pod...> *)nullptr;
+    } else {
+      static_assert(std::is_trivially_copyable_v<Fst> ||
+                        ((!std::is_trivially_copyable_v<rst>)&&...),
+                    "Error: trivially-copyable args must come first");
+      return (argument_allocator<> *)nullptr;
+    }
+  }
+  using type = std::decay_t<decltype(*fst_copyable(
+      (typename argument_allocator_builder<rst...>::type *)nullptr))>;
+};
+
+template <typename... Args>
+using make_argument_allocator =
+    typename argument_allocator_builder<Args...>::type;
+
+} // namespace _details
+
+template <typename... Args> struct argument_allocator {
+  _details::make_argument_allocator<Args...> i;
+
+  argument_allocator(void *serial_region, std::size_t serial_size)
+      : i(serial_region, serial_size) {}
+
+  template <typename T, typename... U>
+  decltype(auto) alloc_and_init(U &&... u) {
+    return i.template alloc_and_init<T>(std::forward<U>(u)...);
+  }
+
+  void *prep_send(const Args &... args) { return i.prep_send(args...); }
+
+  template <typename T> void del(T *t) { i.del(t); }
+};
+
 constexpr const std::size_t size = 1024;
 int main() {
   std::array<char, size> one;
-  argument_allocator<> a{one.data(), sizeof(one)};
+  argument_allocator<std::list<int>> a{one.data(), sizeof(one)};
   auto *i = a.alloc_and_init<std::list<int>>(0);
   a.prep_send(*i);
   a.del(i);
