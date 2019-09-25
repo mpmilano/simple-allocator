@@ -1,26 +1,8 @@
-#include "arg-version2-allocator.hpp"
+#include "message-builder.hpp"
+#include "mutils-serialization/SerializationSupport.hpp"
 #include <array>
 #include <list>
 #include <string>
-
-namespace derecho_allocator {
-
-template <typename... Args> class message_builder {
-  using allocator = internal::build_allocator<Args...>;
-  allocator a;
-
-public:
-  message_builder(unsigned char *serial_region, std::size_t size)
-      : a(serial_region, size) {}
-  template <std::size_t s, typename... CArgs>
-  decltype(auto) build_arg(CArgs &&... cargs) {
-    return a.template build_arg<s, CArgs...>(std::forward<CArgs>(cargs)...);
-  }
-
-  char *serialize() { return a.serialize(); }
-};
-
-} // namespace derecho_allocator
 
 using namespace derecho_allocator;
 
@@ -32,8 +14,14 @@ int main() {
   arg_ptr<char> c = mb.build_arg<1>('e');
   arg_ptr<std::string> s = mb.build_arg<2>("str");
   arg_ptr<std::list<char>> l = mb.build_arg<3>();
-  (void)i;
-  (void)c;
-  (void)s;
-  (void)l;
+  auto buf = mb.serialize(i, c, s, l);
+  mutils::deserialize_and_run(nullptr, buf,
+                              [](const int &i, const char &c,
+                                 const std::string &s,
+                                 const std::list<char> &l) {
+                                assert(i == 15);
+                                assert(c == 'e');
+                                assert(s == "str");
+                                assert(l == std::list<char>{});
+                              });
 }
