@@ -6,7 +6,7 @@
 
 using namespace derecho_allocator;
 
-int main() {
+void test1() {
   std::array<unsigned char, 1024> mem;
   message_builder<int, char, std::string, std::list<char>> mb(mem.data(),
                                                               sizeof(mem));
@@ -25,3 +25,30 @@ int main() {
                                 assert(l == std::list<char>{});
                               });
 }
+
+void test2() {
+  std::array<unsigned char, 1024> mem;
+  message_builder<int, char> mb(mem.data(), sizeof(mem));
+  arg_ptr<int> i = mb.build_arg<0>(15);
+  arg_ptr<char> c = mb.build_arg<1>('e');
+  auto buf = mb.serialize(i, c);
+  mutils::deserialize_and_run(nullptr, buf, [](const int &i, const char &c) {
+    assert(i == 15);
+    assert(c == 'e');
+  });
+}
+
+void test3() {
+  std::array<unsigned char, 1024> mem;
+  message_builder<std::string, std::list<char>> mb(mem.data(), sizeof(mem));
+  arg_ptr<std::string> s = mb.build_arg<0>("str");
+  arg_ptr<std::list<char>> l = mb.build_arg<1>();
+  auto buf = mb.serialize(s, l);
+  mutils::deserialize_and_run(
+      nullptr, buf, [](const std::string &s, const std::list<char> &l) {
+        assert(s == "str");
+        assert(l == std::list<char>{});
+      });
+}
+
+int main() {}

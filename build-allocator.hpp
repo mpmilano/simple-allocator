@@ -6,7 +6,7 @@ namespace derecho_allocator::internal {
 template <typename alloc_outer, typename... T> struct _build_allocator;
 
 template <typename a> struct _build_allocator<a> {
-  using type = typename alloc_outer<>::template alloc_inner<>;
+  using type = typename a::template alloc_inner<>;
 };
 
 template <typename _alloc_outer, typename Fst, typename... Rst>

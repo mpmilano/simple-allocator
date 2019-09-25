@@ -38,7 +38,8 @@ template <typename... StaticArgs> struct alloc_outer {
     using char_p = unsigned char *;
     const char_p serial_region;
     const std::size_t serial_size;
-    static const constexpr auto static_arg_size = (sizeof(StaticArgs) + ...);
+    static const constexpr auto static_arg_size =
+        (sizeof(StaticArgs) + ... + 0);
 
     std::tuple<StaticArgs *...> static_args;
     std::tuple<std::unique_ptr<DynamicArgs>...> allocated_dynamic_args;
@@ -46,18 +47,20 @@ template <typename... StaticArgs> struct alloc_outer {
     alloc_inner(char_p serial_region, std::size_t serial_size)
         : serial_region(serial_region), serial_size(serial_size) {
       assert(serial_size >= static_arg_size);
-      char_p offset = serial_region;
-      std::apply(
-          [&](auto &... static_args) {
-            std::size_t indx = 0;
-            const constexpr std::size_t sizes[] = {sizeof(StaticArgs)...};
-            for (char_p *ptr : {((unsigned char **)&static_args)...}) {
-              *ptr = offset;
-              offset += sizes[indx];
-              ++indx;
-            }
-          },
-          static_args);
+      if constexpr (sizeof...(StaticArgs) > 0) {
+        char_p offset = serial_region;
+        std::apply(
+            [&offset](auto &... static_args) {
+              std::size_t indx = 0;
+              const constexpr std::size_t sizes[] = {sizeof(StaticArgs)...};
+              for (char_p *ptr : {((unsigned char **)&static_args)...}) {
+                *ptr = offset;
+                offset += sizes[indx];
+                ++indx;
+              }
+            },
+            static_args);
+      }
     }
 
     template <std::size_t s> static constexpr bool is_static() {
@@ -66,19 +69,24 @@ template <typename... StaticArgs> struct alloc_outer {
 
     template <std::size_t arg, typename... CArgs>
     decltype(auto) build_arg(CArgs &&... cargs) {
-      static_assert((arg < (sizeof...(StaticArgs) + sizeof...(DynamicArgs))),
-                    "Error: index out of bounds");
-
-      using Arg = get_arg<arg>;
-      if constexpr (is_static<arg>()) {
-        auto *sarg = std::get<arg>(static_args);
-        new (sarg) Arg{std::forward<CArgs>(cargs)...};
-        return arg_ptr<Arg>{sarg};
+      constexpr bool arg_in_bounds =
+          (arg < (sizeof...(StaticArgs) + sizeof...(DynamicArgs)));
+      static_assert(arg_in_bounds, "Error: index out of bounds");
+      if constexpr (arg_in_bounds) {
+        using Arg = get_arg<arg>;
+        if constexpr (is_static<arg>()) {
+          auto *sarg = std::get<arg>(static_args);
+          new (sarg) Arg{std::forward<CArgs>(cargs)...};
+          return arg_ptr<Arg>{sarg};
+        } else {
+          auto &uptr =
+              std::get<arg - sizeof...(StaticArgs)>(allocated_dynamic_args);
+          uptr.reset(new Arg(std::forward<CArgs>(cargs)...));
+          return arg_ptr<Arg>{uptr.get()};
+        }
       } else {
-        auto &uptr =
-            std::get<arg - sizeof...(StaticArgs)>(allocated_dynamic_args);
-        uptr.reset(new Arg(std::forward<CArgs>(cargs)...));
-        return arg_ptr<Arg>{uptr.get()};
+        struct error_arg_out_of_bounds {};
+        return error_arg_out_of_bounds{};
       }
     }
 
