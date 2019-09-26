@@ -76,19 +76,31 @@ void test4() {
                               });
 }
 
+struct beguile {
+  std::array<char, 43> data1;
+  int data2;
+  double data3;
+};
+
+bool operator==(const beguile &l, const beguile &r) {
+  bool same = true;
+  for (uint i = 0; i < 43; ++i) {
+    if (l.data1[i] != r.data1[i])
+      same = false;
+  }
+  return same && (l.data2 == r.data2) && (l.data3 == r.data3);
+}
+
 void test5() {
-
-  struct beguile {
-    std::array<char, 43> data1;
-    int data2;
-    double data3;
-  };
-
   std::array<unsigned char, 1024> mem;
   message_builder<int, beguile, char, std::string, std::list<char>> mb(
       mem.data(), sizeof(mem));
   arg_ptr<int> i = mb.build_arg<0>(15);
   arg_ptr<beguile> bg = mb.build_arg<1>();
+  bg->data1 = {'t', 'h', 'i', 's', ' ', 'i', 's', ' ', 'a',
+               ' ', 's', 't', 'r', 'i', 'n', 'g', 0};
+  bg->data2 = 42;
+  bg->data3 = 3.243;
   arg_ptr<char> c = mb.build_arg<2>('e');
   arg_ptr<std::string> s = mb.build_arg<3>("str");
   std::list<char> reference_l;
@@ -98,15 +110,55 @@ void test5() {
     reference_l.push_back(i);
   }
   auto buf = mb.serialize(i, bg, c, s, l);
-  mutils::deserialize_and_run(nullptr, buf,
-                              [reference_l](const int &i, const char &c,
-                                            const std::string &s,
-                                            const std::list<char> &l) {
-                                assert(i == 15);
-                                assert(c == 'e');
-                                assert(s == "str");
-                                assert(l == reference_l);
-                              });
+  mutils::deserialize_and_run(
+      nullptr, buf,
+      [reference_l](const int &i, const beguile &bg, const char &c,
+                    const std::string &s, const std::list<char> &l) {
+        assert(i == 15);
+        assert(bg.data2 == 42);
+        assert(bg.data3 == 3.243);
+        assert(std::string{bg.data1.data()} == "this is a string");
+        assert(c == 'e');
+        assert(s == "str");
+        assert(l == reference_l);
+      });
+}
+
+void test6() {
+  std::array<unsigned char, 1024> mem;
+  message_builder<int, beguile, char, std::string, std::list<beguile>> mb(
+      mem.data(), sizeof(mem));
+  arg_ptr<int> i = mb.build_arg<0>(15);
+  arg_ptr<beguile> bg = mb.build_arg<1>();
+  bg->data1 = {'t', 'h', 'i', 's', ' ', 'i', 's', ' ', 'a',
+               ' ', 's', 't', 'r', 'i', 'n', 'g', 0};
+  bg->data2 = 42;
+  bg->data3 = 3.243;
+  arg_ptr<char> c = mb.build_arg<2>('e');
+  arg_ptr<std::string> s = mb.build_arg<3>("str");
+  std::list<beguile> reference_l;
+  arg_ptr<std::list<beguile>> l = mb.build_arg<4>();
+  for (char i = 0; i < 'Z'; ++i) {
+    beguile b;
+    b.data1 = {i, i, i, i, 0};
+    b.data2 = i;
+    b.data3 = i + 1 / i;
+    l->push_back(b);
+    reference_l.push_back(b);
+  }
+  auto buf = mb.serialize(i, bg, c, s, l);
+  mutils::deserialize_and_run(
+      nullptr, buf,
+      [reference_l](const int &i, const beguile &bg, const char &c,
+                    const std::string &s, const std::list<beguile> &l) {
+        assert(i == 15);
+        assert(bg.data2 == 42);
+        assert(bg.data3 == 3.243);
+        assert(std::string{bg.data1.data()} == "this is a string");
+        assert(c == 'e');
+        assert(s == "str");
+        assert(l == reference_l);
+      });
 }
 
 int main() {
