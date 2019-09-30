@@ -4,7 +4,7 @@
 #include <list>
 #include <string>
 
-using namespace derecho_allocator;
+using namespace derecho::derecho_allocator;
 
 void test1() {
   std::array<unsigned char, 1024> mem;
